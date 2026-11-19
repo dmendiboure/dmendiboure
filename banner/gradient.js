@@ -203,8 +203,7 @@ function surface(canvas, width, height, scale) {
   };
 }
 
-let drawA;
-let drawB;
+let draw;
 
 // Sizes the banner, in CSS pixels; the gradient draws at a fraction of them, as on the site, since it is soft.
 window.setup = (width, height, { scale = 0.5, fontSize } = {}) => {
@@ -212,16 +211,9 @@ window.setup = (width, height, { scale = 0.5, fontSize } = {}) => {
   stage.style.width = `${width}px`;
   stage.style.height = `${height}px`;
   document.querySelector("h1").style.fontSize = `${fontSize}px`;
-  drawA = surface(document.getElementById("a"), width, height, scale);
-  drawB = surface(document.getElementById("b"), width, height, scale);
+  draw = surface(document.getElementById("gradient"), width, height, scale);
   return document.fonts.ready.then(() => true);
 };
 
-// Draws the gradient at time a, with time b laid over it at the given opacity: the capture fades the loop's
-// last seconds into its first, so the GIF never jumps when it starts again.
-window.frame = (a, b, mix) => {
-  drawA(a);
-  const canvas = document.getElementById("b");
-  if (mix > 0) drawB(b);
-  canvas.style.opacity = String(mix);
-};
+// Draws the gradient at time t, in seconds.
+window.frame = (t) => draw(t);

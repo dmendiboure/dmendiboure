@@ -28,31 +28,43 @@ await page.waitForFunction(() => typeof window.setup === "function");
 await page.evaluate(([w, h, size]) => window.setup(w, h, { fontSize: size }), [width, height, fontSize]);
 const stage = page.locator("#stage");
 
-const capture = async (a, b, mix) => {
-  await page.evaluate(([x, y, z]) => window.frame(x, y, z), [a, b, mix]);
-  return PNG.sync.read(await stage.screenshot({ type: "png" }));
+const capture = async (t) => {
+  await page.evaluate((time) => window.frame(time), t);
+  return PNG.sync.read(await stage.screenshot({ type: "png" })).data;
 };
 
 mkdirSync(join(here, "frames"), { recursive: true });
 
 if (process.argv.includes("--still")) {
-  writeFileSync(join(here, "frames", "still.png"), PNG.sync.write(await capture(start, 0, 0)));
+  const png = new PNG({ width, height });
+  png.data = await capture(start);
+  writeFileSync(join(here, "frames", "still.png"), PNG.sync.write(png));
   await browser.close();
   process.exit(0);
 }
 
-// Frame i shows time t; during the first `fade` seconds the frame from one loop later is laid over it, fading
-// out, so the last frame flows straight into the first.
+// Frame i shows time t. During the first `fade` seconds it is a crossfade, pixel by pixel, from the frame one
+// loop later to it: the first frame is exactly where the last one was heading, so the loop never jumps.
 const count = Math.round(seconds * fps);
 const frames = [];
 for (let i = 0; i < count; i++) {
   const t = i / fps;
+  const frame = await capture(start + t * speed);
   const mix = t < fade ? 1 - t / fade : 0;
-  const eased = mix * mix * (3 - 2 * mix);
-  frames.push((await capture(start + t * speed, start + (t + seconds) * speed, eased)).data);
+  const weight = mix * mix * (3 - 2 * mix);
+  if (weight > 0) {
+    const later = await capture(start + (t + seconds) * speed);
+    for (let p = 0; p < frame.length; p++) frame[p] = Math.round(frame[p] + (later[p] - frame[p]) * weight);
+  }
+  frames.push(frame);
   process.stdout.write(`\rframe ${i + 1}/${count}`);
 }
 await browser.close();
+
+// The seam, checked: the step from the last frame back to the first should be no bigger than any other step.
+const step = (a, b) => a.reduce((sum, value, p) => sum + Math.abs(value - b[p]), 0) / a.length;
+const steps = frames.slice(1).map((frame, i) => step(frames[i], frame));
+console.log(`\nseam ${step(frames.at(-1), frames[0]).toFixed(2)}, largest step ${Math.max(...steps).toFixed(2)}`);
 
 // One palette for the whole loop, so a pixel that does not change keeps its index and costs almost nothing.
 const sample = new Uint8Array(frames.length * 4000 * 4);
@@ -71,8 +83,12 @@ const tolerance = 16 * 16;
 
 const gif = GIFEncoder();
 const delay = Math.round(1000 / fps);
+// The tolerance lets small differences pile up, and the first frame is drawn whole when the GIF starts again,
+// so it eases to nothing over the loop's last second: the last frame matches its colours exactly.
+const settle = fps;
 let shown = null;
-for (const data of frames) {
+for (const [i, data] of frames.entries()) {
+  const allowed = tolerance * Math.min(1, (count - 1 - i) / settle);
   const index = applyPalette(data, palette, "rgb565");
   if (!shown) {
     shown = index.slice();
@@ -86,7 +102,7 @@ for (const data of frames) {
     const dr = data[p * 4] - r;
     const dg = data[p * 4 + 1] - g;
     const db = data[p * 4 + 2] - b;
-    if (index[p] === shown[p] || dr * dr + dg * dg + db * db < tolerance) index[p] = clear;
+    if (index[p] === shown[p] || dr * dr + dg * dg + db * db < allowed) index[p] = clear;
     else shown[p] = index[p];
   }
   gif.writeFrame(index, width, height, { delay, transparent: true, transparentIndex: clear, dispose: 1 });
