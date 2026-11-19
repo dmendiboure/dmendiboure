@@ -39,6 +39,9 @@ const fragmentShader = `
   precision highp float;
   #define MAX_SHAPES ${MAX_SHAPES}
   uniform float uTime;
+  // The loop's angular frequency: every motion below turns a whole number of times per loop, so the last frame
+  // leads exactly into the first.
+  uniform float uOmega;
   uniform float uScale;
   uniform vec2 uSize;
   uniform vec2 uWind;
@@ -76,16 +79,23 @@ const fragmentShader = `
     return 130.0 * dot(m, g);
   }
 
+  // A rate in radians per second, rounded to a whole number of turns per loop (at least one).
+  float loop(float rate) { return max(1.0, floor(rate / uOmega + 0.5)) * uOmega; }
+
+  // Where the site slides through the noise in a straight line, at this many units a second, the loop goes round
+  // a circle at the same speed and comes back to where it started.
+  vec2 orbit(float rate, float t) { return rate / uOmega * vec2(cos(uOmega * t), sin(uOmega * t)); }
+
   float cloth(vec2 p, float t) {
     vec2 across = vec2(-uWind.y, uWind.x);
     float u = dot(p, uWind) / uFold;
     float v = dot(p, across) / uFold;
-    float bend = 1.4 * snoise(vec2(v * 0.55, t * 0.05)) + 0.7 * snoise(vec2(u * 0.4 + 3.1, v * 0.45 - t * 0.04));
-    float billow = sin(u * 6.2831853 + bend) * sin(t * 0.55 + v * 1.3 + bend * 0.5);
+    float bend = 1.4 * snoise(vec2(v * 0.55, 0.0) + orbit(0.05, t)) + 0.7 * snoise(vec2(u * 0.4 + 3.1, v * 0.45) + orbit(0.04, t + 2.0));
+    float billow = sin(u * 6.2831853 + bend) * sin(t * loop(0.55) + v * 1.3 + bend * 0.5);
     vec2 slant = vec2(uWind.x * 0.42 - uWind.y * 0.91, uWind.x * 0.91 + uWind.y * 0.42);
-    float crossing = sin(dot(p, slant) / (uFold * 1.3) * 6.2831853 + t * 0.35 + bend * 0.6) * 0.55;
-    float swell = 0.65 + 0.35 * snoise(vec2(v * 0.7 - t * 0.06, u * 0.25 + 7.0));
-    float ripple = 0.2 * sin(u * 12.566 + v * 1.9 - t * 0.4 + bend);
+    float crossing = sin(dot(p, slant) / (uFold * 1.3) * 6.2831853 + t * loop(0.35) + bend * 0.6) * 0.55;
+    float swell = 0.65 + 0.35 * snoise(vec2(v * 0.7, u * 0.25 + 7.0) + orbit(0.06, t + 4.0));
+    float ripple = 0.2 * sin(u * 12.566 + v * 1.9 - t * loop(0.4) + bend);
     return (billow + crossing) * swell + ripple;
   }
 
@@ -109,9 +119,10 @@ const fragmentShader = `
       float drift = motion.y;
       float speed = motion.z;
 
-      vec2 centre = place.xy + drift * vec2(sin(t * speed + phase), cos(t * speed * 0.83 + phase * 1.7));
-      float turn = form.x + form.y * t;
-      float breath = 1.0 + 0.08 * sin(t * speed * 1.3 + phase);
+      vec2 centre = place.xy + drift * vec2(sin(t * loop(speed) + phase), cos(t * loop(speed * 0.83) + phase * 1.7));
+      // The site's fields keep turning; here they rock back and forth at the same pace instead.
+      float turn = form.x + form.y * sin(uOmega * t + phase) / uOmega;
+      float breath = 1.0 + 0.08 * sin(t * loop(speed * 1.3) + phase);
       vec2 radius = place.zw * breath;
 
       vec2 d = onCloth - centre;
@@ -121,15 +132,15 @@ const fragmentShader = `
 
       float large = max(radius.x, radius.y);
       vec2 warp = vec2(
-        snoise(q / (large * 1.2) + vec2(t * 0.08, phase)),
-        snoise(q / (large * 1.2) + vec2(phase * 1.3, -t * 0.08))
+        snoise(q / (large * 1.2) + vec2(0.0, phase) + orbit(0.08, t + phase)),
+        snoise(q / (large * 1.2) + vec2(phase * 1.3, 0.0) + orbit(0.08, t - phase))
       );
       q += warp * large * 0.35;
 
       float k = length(q / radius);
       float a = motion.x * exp(-k * k * 1.8);
       if (a <= 0.001) continue;
-      float along = clamp(0.5 + q.x / (2.0 * max(radius.x, radius.y)) + 0.15 * sin(t * 0.3 + phase), 0.0, 1.0);
+      float along = clamp(0.5 + q.x / (2.0 * max(radius.x, radius.y)) + 0.15 * sin(t * loop(0.3) + phase), 0.0, 1.0);
       vec3 tint = mix(uFrom[n], uTo[n], smoothstep(0.0, 1.0, along));
       colour = vec4(tint, 1.0) * a + colour * (1.0 - a);
     }
@@ -151,7 +162,7 @@ const tone = ([name, other, amount = 0]) => {
   return a.map((value, index) => value + (b[index] - value) * amount);
 };
 
-function surface(canvas, width, height, scale) {
+function surface(canvas, width, height, scale, period) {
   canvas.width = Math.round(width * scale);
   canvas.height = Math.round(height * scale);
   const gl = canvas.getContext("webgl", { alpha: true, premultipliedAlpha: true, antialias: false, preserveDrawingBuffer: true });
@@ -176,6 +187,7 @@ function surface(canvas, width, height, scale) {
 
   const at = (name) => gl.getUniformLocation(program, name);
   const angle = (cloth.wind * Math.PI) / 180;
+  gl.uniform1f(at("uOmega"), (2 * Math.PI) / period);
   gl.uniform1f(at("uScale"), scale);
   gl.uniform2f(at("uSize"), canvas.width, canvas.height);
   gl.uniform2f(at("uWind"), Math.cos(angle), Math.sin(angle));
@@ -206,12 +218,13 @@ function surface(canvas, width, height, scale) {
 let draw;
 
 // Sizes the banner, in CSS pixels; the gradient draws at a fraction of them, as on the site, since it is soft.
-window.setup = (width, height, { scale = 0.5, fontSize } = {}) => {
+// The period is the loop's length in the shader's own time, in seconds.
+window.setup = (width, height, { scale = 0.5, fontSize, period } = {}) => {
   const stage = document.getElementById("stage");
   stage.style.width = `${width}px`;
   stage.style.height = `${height}px`;
   document.querySelector("h1").style.fontSize = `${fontSize}px`;
-  draw = surface(document.getElementById("gradient"), width, height, scale);
+  draw = surface(document.getElementById("gradient"), width, height, scale, period);
   return document.fonts.ready.then(() => true);
 };
 

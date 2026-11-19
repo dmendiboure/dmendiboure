@@ -17,7 +17,6 @@ const height = 300;
 const fontSize = 104;
 const fps = 12;
 const seconds = 6; // the loop's length
-const fade = 1.5; // how long the end fades into the start
 const start = 4; // a moment where the fields have settled into a good spread
 const speed = 1.6; // the site's motion, sped up so a short loop still shows it moving
 
@@ -25,7 +24,10 @@ const browser = await chromium.launch({ channel: "chrome", args: ["--use-angle=s
 const page = await browser.newPage({ viewport: { width, height }, deviceScaleFactor: 1 });
 await page.goto(pathToFileURL(join(here, "banner.html")).href);
 await page.waitForFunction(() => typeof window.setup === "function");
-await page.evaluate(([w, h, size]) => window.setup(w, h, { fontSize: size }), [width, height, fontSize]);
+await page.evaluate(
+  ([w, h, size, period]) => window.setup(w, h, { fontSize: size, period }),
+  [width, height, fontSize, seconds * speed],
+);
 const stage = page.locator("#stage");
 
 const capture = async (t) => {
@@ -43,20 +45,12 @@ if (process.argv.includes("--still")) {
   process.exit(0);
 }
 
-// Frame i shows time t. During the first `fade` seconds it is a crossfade, pixel by pixel, from the frame one
-// loop later to it: the first frame is exactly where the last one was heading, so the loop never jumps.
+// The shader's motion repeats every `seconds * speed` of its time, so the frame after the last one would be the
+// first one again: the loop is seamless with no fade.
 const count = Math.round(seconds * fps);
 const frames = [];
 for (let i = 0; i < count; i++) {
-  const t = i / fps;
-  const frame = await capture(start + t * speed);
-  const mix = t < fade ? 1 - t / fade : 0;
-  const weight = mix * mix * (3 - 2 * mix);
-  if (weight > 0) {
-    const later = await capture(start + (t + seconds) * speed);
-    for (let p = 0; p < frame.length; p++) frame[p] = Math.round(frame[p] + (later[p] - frame[p]) * weight);
-  }
-  frames.push(frame);
+  frames.push(await capture(start + (i / fps) * speed));
   process.stdout.write(`\rframe ${i + 1}/${count}`);
 }
 await browser.close();
