@@ -1,0 +1,13 @@
+{
+  "name": "profile-banner",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node render.mjs"
+  },
+  "devDependencies": {
+    "gifenc": "1.0.3",
+    "playwright": "1.65.0",
+    "pngjs": "7.0.0"
+  }
+}

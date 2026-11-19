@@ -1,3 +1,7 @@
+<p align="center">
+  <a href="https://dylanmendiboure.fr"><img src="./assets/banner.gif" alt="Dylan Mendiboure" width="100%"></a>
+</p>
+
 ## Hi there 👋
 
 <!--
