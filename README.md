@@ -2,8 +2,6 @@
   <a href="https://dylanmendiboure.fr"><img src="./assets/banner.gif" alt="Dylan Mendiboure" width="100%"></a>
 </p>
 
-## Hi there 👋
-
 <!--
 **dmendiboure/dmendiboure** is a ✨ _special_ ✨ repository because its `README.md` (this file) appears on your GitHub profile.
 
